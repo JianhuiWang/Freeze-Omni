@@ -68,7 +68,7 @@ tts_pool = TTSObjectPool(size=MAX_USERS, model_path=configs.model_path)
 app = Flask(__name__, template_folder='../web/resources')
 socketio = SocketIO(app)
 # init connected users
-connected_users = {}
+connected_users: dict[str, tuple[Timer, GlobalParams]] = {}
 
 def decoder(cur_hidden_state, cur_text, outputs, connected_users, sid, generate_num, last_text, is_last_chunk=False):
     """
