@@ -356,30 +356,85 @@ class AudioLLM(torch.nn.Module):
         """
         output = output.squeeze(0).squeeze(0)
 
+        # 检查 output 是否包含无效值
+        if torch.isnan(output).any() or torch.isinf(output).any():
+            print("警告：output 包含 NaN 或 Inf 值。")
+            output = torch.nan_to_num(output, nan=0.0, posinf=0.0, neginf=0.0)
+
         # temperature
         if temperature != 1.0:
             output = output / temperature
 
+        # 计算 softmax 概率
         probs = torch.nn.functional.softmax(output, dim=-1)
+
+        # 检查 probs 是否包含无效值
+        if torch.isnan(probs).any() or torch.isinf(probs).any():
+            print("警告：probs 在 softmax 之后包含 NaN 或 Inf 值。")
+            probs = torch.nan_to_num(probs, nan=0.0, posinf=0.0, neginf=0.0)
+
+        # 确保 probs 为非负值
+        probs = torch.clamp(probs, min=0)
+
+        # 检查 probs 的总和是否为零
+        probs_sum = probs.sum()
+        if probs_sum == 0:
+            print("警告：probs 的总和为零，将使用均匀分布。")
+            probs = torch.ones_like(probs)
+            probs = probs / probs.sum()
+        else:
+            probs = probs / probs_sum
 
         # top_k
         if top_k > 0:
             top_k_probs, top_k_indices = torch.topk(probs, top_k)
             probs = torch.zeros_like(probs).scatter_(0, top_k_indices, top_k_probs)
-            probs = probs / probs.sum()
+
+            # 重新归一化
+            probs_sum = probs.sum()
+            if probs_sum == 0:
+                print("警告：应用 top_k 后 probs 的总和为零，将使用均匀分布。")
+                probs = torch.ones_like(probs)
+                probs = probs / probs.sum()
+            else:
+                probs = probs / probs_sum
 
         # top_p
         if top_p > 0.0:
             sorted_probs, sorted_indices = torch.sort(probs, descending=True)
             cumulative_probs = torch.cumsum(sorted_probs, dim=-1)
             sorted_indices_to_remove = cumulative_probs > top_p
+
+            # 确保至少保留第一个概率值
             if sorted_indices_to_remove[0]:
                 sorted_indices_to_remove[1:] = sorted_indices_to_remove[:-1].clone()
-                sorted_indices_to_remove[0] = 0
+                sorted_indices_to_remove[0] = False
 
             indices_to_remove = sorted_indices[sorted_indices_to_remove]
             probs[indices_to_remove] = 0
-            probs = probs / probs.sum()
+
+            # 重新归一化
+            probs_sum = probs.sum()
+            if probs_sum == 0:
+                print("警告：应用 top_p 后 probs 的总和为零，将使用均匀分布。")
+                probs = torch.ones_like(probs)
+                probs = probs / probs.sum()
+            else:
+                probs = probs / probs_sum
+
+        # 再次检查 probs 的有效性
+        if torch.isnan(probs).any() or torch.isinf(probs).any() or (probs < 0).any():
+            print("警告：在 multinomial 之前，probs 包含无效值。")
+            probs = torch.nan_to_num(probs, nan=0.0, posinf=0.0, neginf=0.0)
+            probs = torch.clamp(probs, min=0)
+            probs_sum = probs.sum()
+            if probs_sum == 0:
+                print("错误：probs 的总和为零，无法进行采样。")
+                # 使用均匀分布作为替代
+                probs = torch.ones_like(probs)
+                probs = probs / probs.sum()
+            else:
+                probs = probs / probs_sum
 
         token_index = torch.multinomial(probs, 1)
         return token_index.unsqueeze(0)
