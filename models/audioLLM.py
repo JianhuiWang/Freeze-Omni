@@ -13,6 +13,9 @@ from typing import Dict, List, Optional, Tuple
 from transformers import AutoModelForCausalLM
 from transformers import AutoTokenizer
 
+from transformers import PreTrainedTokenizer  # ç”¨äºç±»å‹æ³¨é‡Š
+from transformers import Qwen2ForCausalLM  # ç”¨äºç±»å‹æ³¨é‡Š
+
 from models.adapter import *
 
 IGNORE_ID = -1
@@ -56,38 +59,38 @@ class AudioLLM(torch.nn.Module):
     ):
         super().__init__()
 
-        self.encoder =  encoder
-        self.llm_decoder = AutoModelForCausalLM.from_pretrained(llm_path, 
+        self.encoder: torch.nn.Module =  encoder
+        self.llm_decoder: Qwen2ForCausalLM = AutoModelForCausalLM.from_pretrained(llm_path, 
                                                     torch_dtype="auto",
                                                     trust_remote_code=True)
-        self.tokenizer = AutoTokenizer.from_pretrained(llm_path, 
+        self.tokenizer: PreTrainedTokenizer = AutoTokenizer.from_pretrained(llm_path, 
                                                     trust_remote_code=True)
-        self.freeze_llm =  freeze_llm
-        self.enc_out_dim = enc_out_dim
-        self.llm_embed_dim = llm_embed_dim
-        self.IGNORE_ID = IGNORE_ID
-        self.add_audio_bos_eos = add_audio_bos_eos
-        self.add_ctc_prompt_ratio = add_ctc_prompt_ratio
-        self.lang_dict = lang_dict
-        self.tokenize_ctc_char = tokenize_ctc_char
-        self.task_before_audio = task_before_audio
-        self.hyp_before_task = hyp_before_task
-        self.prompt_finetune = prompt_finetune
-        self.add_prompt_before = add_prompt_before
-        self.prompt_num = prompt_num
-        self.prefix_finetune = prefix_finetune
-        self.prefix_num = prefix_num
-        self.llm_head_num = llm_head_num
+        self.freeze_llm: bool =  freeze_llm
+        self.enc_out_dim: int = enc_out_dim
+        self.llm_embed_dim: int = llm_embed_dim
+        self.IGNORE_ID: int = IGNORE_ID
+        self.add_audio_bos_eos: bool = add_audio_bos_eos
+        self.add_ctc_prompt_ratio: float = add_ctc_prompt_ratio
+        self.lang_dict: dict = lang_dict
+        self.tokenize_ctc_char: bool = tokenize_ctc_char
+        self.task_before_audio: bool = task_before_audio
+        self.hyp_before_task: bool = hyp_before_task
+        self.prompt_finetune: bool = prompt_finetune
+        self.add_prompt_before: bool = add_prompt_before
+        self.prompt_num: int = prompt_num
+        self.prefix_finetune: bool = prefix_finetune
+        self.prefix_num: int = prefix_num
+        self.llm_head_num: int = llm_head_num
         if num_key_value_heads is None:
-            self.num_key_value_heads = llm_head_num
+            self.num_key_value_heads: int = llm_head_num
         else:
             self.num_key_value_heads = num_key_value_heads
         self.kv_cache_dim = llm_embed_dim // self.llm_head_num * self.num_key_value_heads
-        self.task_type = task_type
-        self.freeze_encoder = freeze_encoder
-        self.freeze_adpter = freeze_adpter
-        self.predict_usr_state = predict_usr_state
-        self.chunk_size = chunk_size
+        self.task_type: str = task_type
+        self.freeze_encoder: bool = freeze_encoder
+        self.freeze_adpter: bool = freeze_adpter
+        self.predict_usr_state: int = predict_usr_state
+        self.chunk_size: int = chunk_size
 
         if not hasattr(self.tokenizer, "eod_id"):
             self.tokenizer.eod_id = self.tokenizer.eos_token_id
@@ -356,30 +359,30 @@ class AudioLLM(torch.nn.Module):
         """
         output = output.squeeze(0).squeeze(0)
 
-        # ¼ì²é output ÊÇ·ñ°üº¬ÎŞĞ§Öµ
+        # æ£€æŸ¥ output æ˜¯å¦åŒ…å«æ— æ•ˆå€¼
         if torch.isnan(output).any() or torch.isinf(output).any():
-            print("¾¯¸æ£ºoutput °üº¬ NaN »ò Inf Öµ¡£")
+            print("è­¦å‘Šï¼šoutput åŒ…å« NaN æˆ– Inf å€¼ã€‚")
             output = torch.nan_to_num(output, nan=0.0, posinf=0.0, neginf=0.0)
 
         # temperature
         if temperature != 1.0:
             output = output / temperature
 
-        # ¼ÆËã softmax ¸ÅÂÊ
+        # è®¡ç®— softmax æ¦‚ç‡
         probs = torch.nn.functional.softmax(output, dim=-1)
 
-        # ¼ì²é probs ÊÇ·ñ°üº¬ÎŞĞ§Öµ
+        # æ£€æŸ¥ probs æ˜¯å¦åŒ…å«æ— æ•ˆå€¼
         if torch.isnan(probs).any() or torch.isinf(probs).any():
-            print("¾¯¸æ£ºprobs ÔÚ softmax Ö®ºó°üº¬ NaN »ò Inf Öµ¡£")
+            print("è­¦å‘Šï¼šprobs åœ¨ softmax ä¹‹ååŒ…å« NaN æˆ– Inf å€¼ã€‚")
             probs = torch.nan_to_num(probs, nan=0.0, posinf=0.0, neginf=0.0)
 
-        # È·±£ probs Îª·Ç¸ºÖµ
+        # ç¡®ä¿ probs ä¸ºéè´Ÿå€¼
         probs = torch.clamp(probs, min=0)
 
-        # ¼ì²é probs µÄ×ÜºÍÊÇ·ñÎªÁã
+        # æ£€æŸ¥ probs çš„æ€»å’Œæ˜¯å¦ä¸ºé›¶
         probs_sum = probs.sum()
         if probs_sum == 0:
-            print("¾¯¸æ£ºprobs µÄ×ÜºÍÎªÁã£¬½«Ê¹ÓÃ¾ùÔÈ·Ö²¼¡£")
+            print("è­¦å‘Šï¼šprobs çš„æ€»å’Œä¸ºé›¶ï¼Œå°†ä½¿ç”¨å‡åŒ€åˆ†å¸ƒã€‚")
             probs = torch.ones_like(probs)
             probs = probs / probs.sum()
         else:
@@ -390,10 +393,10 @@ class AudioLLM(torch.nn.Module):
             top_k_probs, top_k_indices = torch.topk(probs, top_k)
             probs = torch.zeros_like(probs).scatter_(0, top_k_indices, top_k_probs)
 
-            # ÖØĞÂ¹éÒ»»¯
+            # é‡æ–°å½’ä¸€åŒ–
             probs_sum = probs.sum()
             if probs_sum == 0:
-                print("¾¯¸æ£ºÓ¦ÓÃ top_k ºó probs µÄ×ÜºÍÎªÁã£¬½«Ê¹ÓÃ¾ùÔÈ·Ö²¼¡£")
+                print("è­¦å‘Šï¼šåº”ç”¨ top_k å probs çš„æ€»å’Œä¸ºé›¶ï¼Œå°†ä½¿ç”¨å‡åŒ€åˆ†å¸ƒã€‚")
                 probs = torch.ones_like(probs)
                 probs = probs / probs.sum()
             else:
@@ -405,7 +408,7 @@ class AudioLLM(torch.nn.Module):
             cumulative_probs = torch.cumsum(sorted_probs, dim=-1)
             sorted_indices_to_remove = cumulative_probs > top_p
 
-            # È·±£ÖÁÉÙ±£ÁôµÚÒ»¸ö¸ÅÂÊÖµ
+            # ç¡®ä¿è‡³å°‘ä¿ç•™ç¬¬ä¸€ä¸ªæ¦‚ç‡å€¼
             if sorted_indices_to_remove[0]:
                 sorted_indices_to_remove[1:] = sorted_indices_to_remove[:-1].clone()
                 sorted_indices_to_remove[0] = False
@@ -413,24 +416,24 @@ class AudioLLM(torch.nn.Module):
             indices_to_remove = sorted_indices[sorted_indices_to_remove]
             probs[indices_to_remove] = 0
 
-            # ÖØĞÂ¹éÒ»»¯
+            # é‡æ–°å½’ä¸€åŒ–
             probs_sum = probs.sum()
             if probs_sum == 0:
-                print("¾¯¸æ£ºÓ¦ÓÃ top_p ºó probs µÄ×ÜºÍÎªÁã£¬½«Ê¹ÓÃ¾ùÔÈ·Ö²¼¡£")
+                print("è­¦å‘Šï¼šåº”ç”¨ top_p å probs çš„æ€»å’Œä¸ºé›¶ï¼Œå°†ä½¿ç”¨å‡åŒ€åˆ†å¸ƒã€‚")
                 probs = torch.ones_like(probs)
                 probs = probs / probs.sum()
             else:
                 probs = probs / probs_sum
 
-        # ÔÙ´Î¼ì²é probs µÄÓĞĞ§ĞÔ
+        # å†æ¬¡æ£€æŸ¥ probs çš„æœ‰æ•ˆæ€§
         if torch.isnan(probs).any() or torch.isinf(probs).any() or (probs < 0).any():
-            print("¾¯¸æ£ºÔÚ multinomial Ö®Ç°£¬probs °üº¬ÎŞĞ§Öµ¡£")
+            print("è­¦å‘Šï¼šåœ¨ multinomial ä¹‹å‰ï¼Œprobs åŒ…å«æ— æ•ˆå€¼ã€‚")
             probs = torch.nan_to_num(probs, nan=0.0, posinf=0.0, neginf=0.0)
             probs = torch.clamp(probs, min=0)
             probs_sum = probs.sum()
             if probs_sum == 0:
-                print("´íÎó£ºprobs µÄ×ÜºÍÎªÁã£¬ÎŞ·¨½øĞĞ²ÉÑù¡£")
-                # Ê¹ÓÃ¾ùÔÈ·Ö²¼×÷ÎªÌæ´ú
+                print("é”™è¯¯ï¼šprobs çš„æ€»å’Œä¸ºé›¶ï¼Œæ— æ³•è¿›è¡Œé‡‡æ ·ã€‚")
+                # ä½¿ç”¨å‡åŒ€åˆ†å¸ƒä½œä¸ºæ›¿ä»£
                 probs = torch.ones_like(probs)
                 probs = probs / probs.sum()
             else:
